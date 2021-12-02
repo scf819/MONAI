@@ -16,7 +16,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
-from monai.data import write_png
+from monai.data.image_writer import PILWriter
 
 
 class TestPngWrite(unittest.TestCase):
@@ -25,7 +25,10 @@ class TestPngWrite(unittest.TestCase):
             image_name = os.path.join(out_dir, "test.png")
             img = np.random.rand(2, 3)
             img_save_val = (255 * img).astype(np.uint8)
-            write_png(img, image_name, scale=255)
+            img_obj = PILWriter.create_data_obj(
+                data_array=img, channel_dim=None, output_dtype=np.uint8, kwargs={"scale": 255}
+            )
+            PILWriter.write(image_name, img_obj, format="PNG")
             out = np.asarray(Image.open(image_name))
             out = np.moveaxis(out, 0, 1)
             np.testing.assert_allclose(out, img_save_val)
@@ -35,7 +38,10 @@ class TestPngWrite(unittest.TestCase):
             image_name = os.path.join(out_dir, "test.png")
             img = np.random.rand(1, 3)
             img_save_val = (65535 * img).astype(np.uint16)
-            write_png(img, image_name, scale=65535)
+            img_obj = PILWriter.create_data_obj(
+                data_array=img, channel_dim=None, output_dtype=np.uint16, kwargs={"scale": 65535}
+            )
+            PILWriter.write(image_name, img_obj, format="PNG")
             out = np.asarray(Image.open(image_name))
             out = np.moveaxis(out, 0, 1)
             np.testing.assert_allclose(out, img_save_val)
@@ -45,17 +51,22 @@ class TestPngWrite(unittest.TestCase):
             image_name = os.path.join(out_dir, "test.png")
             img = np.random.rand(2, 3, 1)
             img_save_val = (255 * img).astype(np.uint8).squeeze(2)
-            write_png(img, image_name, scale=255)
+            img_obj = PILWriter.create_data_obj(
+                data_array=img, channel_dim=None, output_dtype=np.uint8, kwargs={"scale": 255}
+            )
+            PILWriter.write(image_name, img_obj, format="PNG")
             out = np.asarray(Image.open(image_name))
             out = np.moveaxis(out, 0, 1)
             np.testing.assert_allclose(out, img_save_val)
 
     def test_write_rgb(self):
+        """testing default kwargs and obj_kwargs"""
         with tempfile.TemporaryDirectory() as out_dir:
             image_name = os.path.join(out_dir, "test.png")
             img = np.random.rand(2, 3, 3)
             img_save_val = (255 * img).astype(np.uint8)
-            write_png(img, image_name, scale=255)
+            img_obj = PILWriter.create_data_obj(data_array=img, channel_dim=-1, output_dtype=np.uint8)
+            PILWriter.write(image_name, img_obj)
             out = np.asarray(Image.open(image_name))
             out = np.moveaxis(out, 0, 1)
             np.testing.assert_allclose(out, img_save_val)
@@ -65,7 +76,10 @@ class TestPngWrite(unittest.TestCase):
             image_name = os.path.join(out_dir, "test.png")
             img = np.random.rand(2, 3, 2)
             img_save_val = (255 * img).astype(np.uint8)
-            write_png(img, image_name, scale=255)
+            img_obj = PILWriter.create_data_obj(
+                data_array=img, channel_dim=-1, output_dtype=np.uint8, kwargs={"scale": 255}
+            )
+            PILWriter.write(image_name, img_obj, format="PNG")
             out = np.asarray(Image.open(image_name))
             out = np.moveaxis(out, 0, 1)
             np.testing.assert_allclose(out, img_save_val)
@@ -74,7 +88,14 @@ class TestPngWrite(unittest.TestCase):
         with tempfile.TemporaryDirectory() as out_dir:
             image_name = os.path.join(out_dir, "test.png")
             img = np.random.rand(2, 2, 3)
-            write_png(img, image_name, (4, 4), scale=255)
+            img_obj = PILWriter.create_data_obj(
+                data_array=img,
+                metadata={"spatial_shape": (4, 4)},
+                channel_dim=-1,
+                output_dtype=np.uint8,
+                kwargs={"scale": 255},
+            )
+            PILWriter.write(image_name, img_obj, format="PNG")
             out = np.asarray(Image.open(image_name))
             np.testing.assert_allclose(out.shape, (4, 4, 3))
 

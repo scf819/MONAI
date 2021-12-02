@@ -25,8 +25,7 @@ import torch
 
 from monai.config import DtypeLike, PathLike
 from monai.data.image_reader import ImageReader, ITKReader, NibabelReader, NumpyReader, PILReader
-from monai.data.nifti_saver import NiftiSaver
-from monai.data.png_saver import PNGSaver
+from monai.data.image_writer import FolderLayout, ITKWriter, NibabelWriter, PILWriter
 from monai.transforms.transform import Transform
 from monai.utils import GridSampleMode, GridSamplePadMode
 from monai.utils import ImageMetaKey as Key
@@ -112,7 +111,7 @@ class LoadImage(Transform):
               or a tuple of two elements containing the data array, and the meta data in a dictionary format otherwise.
             - If `reader` is specified, the loader will attempt to use the specified readers and the default supported
               readers. This might introduce overheads when handling the exceptions of trying the incompatible loaders.
-              In this case, it is therefore recommended to set the most appropriate reader as
+              In this case, it is therefore recommended setting the most appropriate reader as
               the last item of the `reader` parameter.
 
         """
@@ -231,8 +230,8 @@ class SaveImage(Transform):
     It can work for both numpy array and PyTorch Tensor in both preprocessing transform
     chain and postprocessing transform chain.
     The name of saved file will be `{input_image_name}_{output_postfix}{output_ext}`,
-    where the input image name is extracted from the provided meta data dictionary.
-    If no meta data provided, use index from 0 as the filename prefix.
+    where the input image name is extracted from the provided metadata dictionary.
+    If no metadata provided, use index from 0 as the filename prefix.
     It can also save a list of PyTorch Tensor or numpy array without `batch dim`.
 
     Note: image should be channel-first shape: [C,H,W,[D]].
@@ -308,36 +307,27 @@ class SaveImage(Transform):
         separate_folder: bool = True,
         print_log: bool = True,
     ) -> None:
-        self.saver: Union[NiftiSaver, PNGSaver]
-        if output_ext in {".nii.gz", ".nii"}:
-            self.saver = NiftiSaver(
-                output_dir=output_dir,
-                output_postfix=output_postfix,
-                output_ext=output_ext,
-                resample=resample,
-                mode=GridSampleMode(mode),
-                padding_mode=padding_mode,
-                dtype=dtype,
-                output_dtype=output_dtype,
-                squeeze_end_dims=squeeze_end_dims,
-                data_root_dir=data_root_dir,
-                separate_folder=separate_folder,
-                print_log=print_log,
-            )
-        elif output_ext == ".png":
-            self.saver = PNGSaver(
-                output_dir=output_dir,
-                output_postfix=output_postfix,
-                output_ext=output_ext,
-                resample=resample,
-                mode=InterpolateMode(mode),
-                scale=scale,
-                data_root_dir=data_root_dir,
-                separate_folder=separate_folder,
-                print_log=print_log,
-            )
-        else:
-            raise ValueError(f"unsupported output extension: {output_ext}.")
+        self.folder_layout = FolderLayout(
+            output_dir=output_dir,
+            postfix=output_postfix,
+            extension=output_ext,
+            parent=separate_folder,
+            makedirs=True,
+            data_root_dir=data_root_dir,
+        )
+
+        self.output_ext = output_ext
+
+        self.resample = resample
+        self.mode = mode
+        self.padding_mode = padding_mode
+        self.scale = scale
+        self.dtype = dtype
+        self.output_dtype = output_dtype
+        self.squeeze_end_dims = squeeze_end_dims
+        self.print_log = print_log
+
+        self._data_index = 0
 
     def __call__(self, img: Union[torch.Tensor, np.ndarray], meta_data: Optional[Dict] = None):
         """
@@ -346,6 +336,42 @@ class SaveImage(Transform):
             meta_data: key-value pairs of meta_data corresponding to the data.
 
         """
-        self.saver.save(img, meta_data)
+        subject = meta_data[Key.FILENAME_OR_OBJ] if meta_data else str(self._data_index)
+        patch_index = meta_data.get(Key.PATCH_INDEX, None) if meta_data else None
+        filename = self.folder_layout.filename(subject=f"{subject}", idx=patch_index)
 
+        if self.output_ext == ".png":
+            image_obj = PILWriter.create_data_obj(
+                data_array=img,
+                metadata=meta_data,
+                resample=self.resample,
+                channel_dim=0,  # always channel-first as in transforms
+                squeeze_end_dims=self.squeeze_end_dims,
+                output_dtype=np.uint8 if self.output_dtype not in (np.uint8, np.uint16) else self.output_dtype,
+                kwargs={"mode": self.mode, "scale": self.scale},
+            )
+            PILWriter.write(filename, image_obj, verbose=self.print_log)
+        if self.output_ext in (".nii.gz", ".nii"):
+            image_obj = NibabelWriter.create_data_obj(
+                data_array=img,
+                metadata=meta_data,
+                resample=self.resample,
+                channel_dim=0,  # always channel-first as in transforms
+                squeeze_end_dims=self.squeeze_end_dims,
+                output_dtype=self.output_dtype,
+                kwargs={"mode": self.mode, "padding_mode": self.padding_mode, "dtype": self.dtype},
+            )
+            NibabelWriter.write(filename, image_obj, verbose=self.print_log)
+        if self.output_ext in (".dcm", ".nrrd"):
+            image_obj = ITKWriter.create_data_obj(
+                data_array=img,
+                metadata=meta_data,
+                resample=self.resample,
+                channel_dim=0,  # always channel-first as in transforms
+                squeeze_end_dims=self.squeeze_end_dims,
+                output_dtype=self.output_dtype,
+                kwargs={"mode": self.mode, "padding_mode": self.padding_mode, "dtype": self.dtype},
+            )
+            ITKWriter.write(filename, image_obj, verbose=self.print_log)
+        self._data_index += 1
         return img
